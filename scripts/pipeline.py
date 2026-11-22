@@ -278,8 +278,8 @@ def next_version(path):
 
 
 def edit_job(path, meta, source, version):
-    return {"schema_version": 3, "document_id": meta["document_id"], "version": version,
-            "pdf_editor": "PdfCraft MCP", "tool_namespace": "mcp__pdfcraft", "fallback_allowed": False,
+    return {"schema_version": 4, "document_id": meta["document_id"], "version": version,
+            "pdf_editor": "PdfCraft CLI", "fallback_allowed": False,
             "source_pdf": str(source), "source_sha256": meta["source"]["sha256"],
             "trans_md": str(path / "review/trans.md"), "glossary_md": str(path / "review/glossary.md"),
             "review_sha256": review_hashes(path),
@@ -337,7 +337,7 @@ def publish(root, doc_id, version, pdf):
         require(sha256(staging / filename) == candidate_hash == sha256(candidate), "게시 중 후보 PDF가 변경되었습니다.")
         verified_job(root, doc_id, version)
         write_json(staging / "receipt.json", {"document_id": doc_id, "version": version,
-                   "pdf_editor": "PdfCraft MCP", "source_sha256": meta["source"]["sha256"],
+                   "pdf_editor": job["pdf_editor"], "source_sha256": meta["source"]["sha256"],
                    "review_sha256": job["review_sha256"], "pdf_sha256": candidate_hash,
                    "published_at": now()})
         os.link(staging / "receipt.json", receipt_path)

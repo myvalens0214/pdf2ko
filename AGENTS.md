@@ -23,9 +23,9 @@
 
 한글 PDF는 기본적으로 텍스트 영역만 한글로 바꾼다. 그림과 그림에 포함된 글자는 원본 그대로 보존하며, 사용자가 그림 편집을 요청한 경우에만 지정한 부분을 수정한다.
 
-1. `prepare-edit`로 입력 해시를 기록한다. PDF 편집·합성·저장은 **PdfCraft MCP**에서 수행한다. `tool_search` 또는 `command_list`로 실제 도구와 인자를 확인하고, 연결이나 필수 기능이 없으면 중단 사유를 알린다.
-2. `doc_open`으로 원본을 열어 메모리에서 편집한다. 사용자 요청에 따라 한글 글꼴을 포함한 별도 텍스트 레이어는 ReportLab 등으로 만들 수 있다. 영문 제거, 레이어 삽입, 후보 PDF 저장은 PdfCraft에서 수행한다. 읽기 전용 추출·검증과 바이트를 유지하는 복사·이동은 허용한다.
-3. `doc_save`에 `work/edit-vNNN/candidate.pdf`의 절대 경로를 지정한다. `publish`로 후보를 바이트 변경 없이 `output/<id>-ko-vNNN.pdf`에 복사하고 게시 기록을 `work/edit-vNNN/receipt.json`에 남긴다.
+1. `prepare-edit`로 입력 해시를 기록한다. PDF 편집·합성·저장은 **PdfCraft CLI**(`pdfcraft-cli`)로 수행한다. `pdfcraft-cli --help`와 `pdfcraft-cli tools`로 실제 명령과 인자를 확인하고, 실행 파일이나 필수 기능이 없으면 중단 사유를 알린다.
+2. `pdfcraft-cli run --script`로 열기·편집·저장을 한 실행에 묶고, `doc_open`으로 원본을 열어 메모리에서 편집한다. 사용자 요청에 따라 한글 글꼴을 포함한 별도 텍스트 레이어는 ReportLab 등으로 만들 수 있다. 영문 제거, 레이어 삽입, 후보 PDF 저장은 PdfCraft CLI에서 수행한다. 읽기 전용 추출·검증과 바이트를 유지하는 복사·이동은 허용한다.
+3. 실행 스크립트의 `doc_save`에 `work/edit-vNNN/candidate.pdf`의 절대 경로를 지정한다. `publish`로 후보를 바이트 변경 없이 `output/<id>-ko-vNNN.pdf`에 복사하고 게시 기록을 `work/edit-vNNN/receipt.json`에 남긴다.
 4. 결과를 전달하면 종료한다. 번역 누락·글자 깨짐·잘림·겹침 등 최종 PDF의 내용·시각 검수는 사람이 맡는다. 에이전트는 검수용 재열기·렌더링·보고서 생성을 수행하지 않는다. 이 규칙은 PDF 스킬의 일반 검수 절차보다 우선한다.
 
 ## 구현과 검증

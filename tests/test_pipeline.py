@@ -64,6 +64,7 @@ class MarkdownWorkflowTests(unittest.TestCase):
         before = {file.name: file.read_bytes() for file in (self.trans, self.glossary)}
         job, candidate = self.candidate()
         self.assertEqual(job['version'], 'v001')
+        self.assertEqual(job['pdf_editor'], 'PdfCraft CLI')
         self.assertEqual(job['trans_md'], str(self.trans))
         self.assertEqual(p.review_content(self.root, 'rules')['segments'][0]['final_ko'], '사람이 저장한 번역')
         self.assertEqual(p.prepare_edit(self.root, 'rules', 'v001'), job)
@@ -73,6 +74,7 @@ class MarkdownWorkflowTests(unittest.TestCase):
         self.assertEqual(job['output_pdf'], str(output))
         self.assertEqual(output.read_bytes(), candidate.read_bytes())
         receipt = json.loads((candidate.parent / 'receipt.json').read_text())
+        self.assertEqual(receipt['pdf_editor'], job['pdf_editor'])
         self.assertNotIn('visual_qa_confirmed', receipt)
         for file in (self.trans, self.glossary):
             self.assertEqual(file.read_bytes(), before[file.name])
@@ -217,7 +219,8 @@ class MarkdownWorkflowTests(unittest.TestCase):
         job, candidate = self.candidate()
         file = Path(job['path'])
         original = json.loads(file.read_text())
-        for change in ({'pdf_editor': 'Other editor'}, {'fallback_allowed': True}, {'document_id': 'other'}):
+        for change in ({'schema_version': 3}, {'pdf_editor': 'Other editor'},
+                       {'fallback_allowed': True}, {'document_id': 'other'}):
             file.write_text(json.dumps(original | change))
             with self.assertRaises(p.WorkflowError):
                 p.publish(self.root, 'rules', job['version'], candidate)
