@@ -26,130 +26,6 @@ pdf2ko는 Codex로 영문 PDF를 한국어로 번역하는 프로젝트입니다
 4. **결과를 확인합니다.** 전달받은 PDF를 열어 번역 누락, 글자 잘림, 표나 그림과의 겹침을 확인합니다. 결과는 `documents/<id>/output/<id>-ko-v001.pdf`처럼 버전별로 저장됩니다.
 
 
-## 실행 환경 준비
-
-준비할 항목은 **Python 의존성 설치 → PdfCraft CLI 설치**입니다. 번역 검토 파일 작성에는 Python 환경이 필요하고, 한글 PDF 편집에는 PdfCraft CLI를 직접 실행합니다.
-
-`requirements.txt`는 Python 패키지만 설치합니다. 여기서 사용하는 PdfCraft는 [storytold/pdfcraft](https://github.com/storytold/pdfcraft)의 Rust 프로그램이며 실행 파일 이름은 **`pdfcraft-cli`**입니다. `pip install pdfcraft`나 이름이 비슷한 패키지로 대체하지 않습니다.
-
-### 1. Python 환경 준비
-
-저장소 최상위 폴더에서 실행합니다. macOS/Linux의 `sh` 호환 셸 예시입니다.
-
-```sh
-export PDF2KO_PYTHON=python3
-python3 -m pip install -r requirements.txt
-scripts/setup.sh
-```
-
-Windows에서는 Python과 Git Bash를 준비하고, Git Bash에서 위 명령의 `python3`를 `python`으로 바꿔 실행합니다. 이후 프로젝트의 `scripts/*.sh` 명령도 Git Bash에서 실행합니다.
-
-새 터미널에서도 `export PDF2KO_PYTHON=python3`을 설정합니다(Windows는 `python`). 이 변수는 프로젝트 스크립트가 사용할 Python을 지정합니다. `setup.sh`는 `pypdf`, `pdfplumber`, `reportlab`을 가져올 수 있는지 확인하고 `inbox/`와 `documents/`를 준비합니다. **PdfCraft CLI는 아래 안내에 따라 별도로 설치합니다.**
-
-### 2. PdfCraft CLI 설치
-
-아래 방법 중 하나를 선택합니다. 설치 안내 확인일은 **2026-11-22**이며, 당시 [공식 최신 릴리스는 v0.21.1](https://github.com/storytold/pdfcraft/releases/tag/v0.21.1)입니다. 아래 버전은 설치 예시이며 pdf2ko의 최소 지원 버전을 뜻하지 않습니다. 다른 버전을 설치할 때는 [Releases의 Assets](https://github.com/storytold/pdfcraft/releases/latest)에서 실제 파일 이름을 확인합니다.
-
-#### macOS: Homebrew
-
-Homebrew가 설치되어 있다면 [공식 Formula의 설치 명령](https://formulae.brew.sh/formula/pdfcraft-cli)을 사용합니다.
-
-```sh
-brew install pdfcraft-cli
-command -v pdfcraft-cli
-pdfcraft-cli --version
-pdfcraft-cli --help
-```
-
-이미 Homebrew로 설치했다면 `brew upgrade pdfcraft-cli`로 업데이트합니다. Homebrew의 지원 OS와 CPU, 바이너리 제공 여부는 Formula 페이지에서 확인합니다. 지원되지 않는 환경에서는 아래 공식 배포 파일을 사용합니다.
-
-#### macOS/Linux: 공식 CLI 압축 파일
-
-v0.21.1의 실제 배포 파일은 다음과 같습니다. macOS의 DMG는 데스크톱 앱용이고 CLI는 별도 ZIP으로 배포됩니다. Linux에서 CLI만 사용할 때는 전용 tar.gz를 선택할 수 있습니다. [공식 다운로드 안내](https://github.com/storytold/pdfcraft#downloads)
-
-| 환경 | CLI 배포 파일 |
-| --- | --- |
-| macOS, Apple silicon 또는 Intel | `pdfcraft-cli-0.21.1-macos-universal.zip` |
-| Linux, x86_64 | `pdfcraft-cli-0.21.1-linux-x86_64.tar.gz` |
-| Linux, ARM64 / aarch64 | `pdfcraft-cli-0.21.1-linux-aarch64.tar.gz` |
-
-Linux x86_64/aarch64 배포 파일은 glibc 2.35 이상이 필요합니다. CPU는 `uname -m`, glibc 버전은 glibc 기반 배포판에서 `ldd --version`으로 확인할 수 있습니다.
-
-1. 선택한 파일과 같은 릴리스의 `SHA256SUMS.txt`를 내려받습니다. macOS는 `shasum -a 256 파일명`, Linux는 `sha256sum 파일명`으로 해시를 구해 해당 파일의 기록과 비교합니다.
-2. ZIP은 압축 해제 도구 또는 `unzip 파일명.zip`, tar.gz는 `tar -xzf 파일명.tar.gz`로 풉니다.
-3. 풀린 폴더에서 `pdfcraft-cli`를 찾고 아래 첫 번째 경로를 실제 파일의 절대 경로로 바꿔 설치합니다.
-
-```sh
-mkdir -p "$HOME/.local/bin"
-install -m 755 "/absolute/path/to/unpacked/pdfcraft-cli" "$HOME/.local/bin/pdfcraft-cli"
-export PATH="$HOME/.local/bin:$PATH"
-command -v pdfcraft-cli
-pdfcraft-cli --version
-pdfcraft-cli --help
-```
-
-`export PATH=...`는 현재 셸에만 적용됩니다. 계속 사용할 셸의 시작 설정에도 추가하거나, 명령을 실행할 때 실행 파일의 절대 경로를 사용합니다. 수동 설치를 업데이트할 때도 새 배포 파일을 받아 같은 설치 위치를 사용합니다.
-
-Linux에서 `.deb` 또는 `.rpm`을 사용하면 `/usr/bin/pdfcraft-cli`가 함께 설치됩니다. 예를 들어 v0.21.1 x86_64 패키지를 다운로드한 폴더에서 Debian/Ubuntu는 `sudo apt install ./pdfcraft-0.21.1-linux-x86_64.deb`, Fedora는 `sudo dnf install ./pdfcraft-0.21.1-linux-x86_64.rpm`으로 설치합니다. ARM64는 파일명의 `x86_64`를 `aarch64`로 바꿉니다.
-
-#### Windows: MSI 또는 portable ZIP
-
-[v0.21.1 릴리스](https://github.com/storytold/pdfcraft/releases/tag/v0.21.1)에서 CPU에 맞는 파일을 받습니다. 이 릴리스에서 확인되는 Windows 아키텍처는 `x64`와 `arm64`입니다.
-
-| 방식 | 파일명 (`<arch>`는 `x64` 또는 `arm64`) |
-| --- | --- |
-| 설치 프로그램 | `pdfcraft-0.21.1-windows-<arch>.msi` |
-| 압축 해제 후 사용 | `pdfcraft-0.21.1-windows-<arch>-portable.zip` |
-
-MSI 또는 portable ZIP에는 `pdfcraft-cli.exe`가 포함됩니다. MSI는 설치할 때 선택한 폴더, ZIP은 압축을 푼 폴더에서 실행 파일을 찾습니다. ZIP은 폴더 전체를 보관합니다. [공식 Windows 패키징 코드](https://github.com/storytold/pdfcraft/blob/v0.21.1/packaging/windows/package.ps1)
-
-실행 파일이 들어 있는 폴더를 사용자 `Path`에 추가하고 새 PowerShell에서 확인합니다.
-
-```powershell
-Get-Command pdfcraft-cli
-pdfcraft-cli --version
-pdfcraft-cli --help
-```
-
-`Path`에 추가하지 않을 때는 PowerShell에서 `& 'C:\실제 설치 폴더\pdfcraft-cli.exe' --version`처럼 전체 경로로 실행합니다. 다운로드 해시는 `Get-FileHash .\다운로드한파일 -Algorithm SHA256`으로 구해 해당 릴리스의 `SHA256SUMS.txt`와 비교할 수 있습니다.
-
-#### 소스에서 설치해야 하는 경우
-
-저장소를 받은 뒤 다음 명령으로 CLI를 설치합니다. 먼저 Git, Rust/Cargo와 OS의 네이티브 링커가 필요합니다. 확인일 기준 upstream이 안내하는 Rust 최소 버전은 1.95이며, 체크아웃한 버전의 [개발 문서](https://github.com/storytold/pdfcraft/blob/main/docs/development.md)도 확인합니다.
-
-```sh
-# pdf2ko 폴더 밖에서 PdfCraft 소스를 내려받습니다.
-git clone https://github.com/storytold/pdfcraft.git
-cd pdfcraft
-cargo install --path apps/pdfcraft-cli --locked
-export PATH="${CARGO_HOME:-$HOME/.cargo}/bin:$PATH"
-pdfcraft-cli --version
-pdfcraft-cli --help
-```
-
-기본 설치 위치는 macOS/Linux의 `~/.cargo/bin`, Windows의 `%USERPROFILE%\.cargo\bin`이며 Cargo 설치 경로를 변경했다면 그 경로를 사용합니다. `target/release`를 가리키는 링크는 `cargo clean`으로 깨질 수 있으므로 설치된 실행 파일을 사용합니다.
-
-### 3. PdfCraft CLI 실행
-
-Codex는 터미널에서 `pdfcraft-cli`를 직접 실행합니다. 사용 가능한 명령과 편집 인자는 다음 명령으로 확인합니다.
-
-```sh
-pdfcraft-cli --help
-pdfcraft-cli tools
-```
-
-여러 편집 작업은 `pdfcraft-cli run --script steps.json`으로 실행할 수 있습니다. 실행 스크립트는 `tool`과 `args`를 가진 단계 배열이며, `doc_open`으로 열기부터 편집과 `doc_save`로 저장까지 한 실행에 묶습니다. 저장 경로에는 `prepare-edit`가 반환한 `candidate_pdf`의 절대 경로를 사용합니다. 실제 편집에서는 설치된 버전의 명령·인자와 지원 기능을 확인한 뒤 프로젝트의 [편집 절차](agents/editor.md)를 따릅니다.
-
-### 4. 설치·실행 문제 해결
-
-| 증상 | 확인할 사항 |
-| --- | --- |
-| Python 의존성 설치 후에도 `pdfcraft-cli`를 찾지 못함 | Python 패키지와 별도로 위 CLI 설치를 수행했는지 확인합니다. |
-| PdfCraft 앱은 열리지만 CLI 명령을 찾지 못함 | 앱 실행 파일 `pdfcraft`와 CLI `pdfcraft-cli`를 구분하고, 해당 OS의 CLI 설치 위치를 확인합니다. |
-| 터미널에서는 되지만 Codex에서 실행 파일을 찾을 수 없다는 오류 | Codex가 상속한 `PATH`가 다를 수 있습니다. CLI의 절대 경로로 실행하거나 `PATH`를 수정한 뒤 Codex를 다시 시작합니다. |
-| 예상과 다른 버전이 실행됨 | macOS/Linux는 `type -a pdfcraft-cli`, PowerShell은 `Get-Command pdfcraft-cli -All`로 중복 설치를 확인하고 실제 실행 경로를 비교합니다. |
-| CLI를 실행할 수 없거나 필요한 편집 기능을 지원하지 않음 | 설치 버전과 `pdfcraft-cli --help`, `pdfcraft-cli tools`를 확인합니다. PDF 편집은 중단하고 원인을 알리며 다른 엔진으로 우회하지 않습니다. |
-
 ## 검토 파일 편집 예시
 
 두 파일 모두 아래와 같은 표 하나로 구성됩니다. 표 머리글, ID, PDF 페이지, 영어 원문은 그대로 두고 한국어 번역을 수정합니다.
@@ -194,6 +70,147 @@ scripts/run.sh publish example-rules --version v001 \
 - `register`는 새 원본을 문서의 `source/`로 옮깁니다. 내용이 같은 PDF가 이미 등록되어 있으면 기존 문서를 사용합니다. 문서 종류(`--kind`)는 `boardgame`, `"research paper"`, `other` 중에서 선택합니다.
 - `extract`는 추출 결과를 표준 출력으로 보여 줍니다. 텍스트가 없는 스캔 페이지는 번역할 때 OCR과 원본 대조가 필요합니다.
 - `prepare-edit`는 원본과 검토 파일의 해시를 기록합니다. 진행 중인 버전은 `--version v001`처럼 지정해 재개합니다. 입력이나 편집 작업 형식이 바뀌었다면 `--version` 없이 새 버전을 준비합니다.
+- `publish`는 입력 해시·페이지 수·복사 무결성과 페이지별 이미지 전체 소실 여부를 검사합니다. 원본 페이지 콘텐츠에 있던 이미지 그리기 명령이 후보의 같은 페이지에서 전부 사라지면 게시를 차단합니다. 중첩 Form과 인라인 이미지도 확인하며, 사용되지 않는 이미지 리소스는 세지 않습니다. 이미지 개수 일치로 보존을 판정하는 검사가 아니며, 일부 손실·가림·잘림·화면 밖 배치는 최종 시각 검수에서 사람이 확인합니다.
 - 전체 문서 상태는 `scripts/run.sh status`로 확인합니다. 다른 프로젝트 폴더를 사용하려면 `scripts/run.sh --root /path/to/project status`처럼 명령 이름 앞에 `--root`를 넣습니다.
 
 에이전트의 작업 절차와 파일 보존 규칙은 [AGENTS.md](AGENTS.md)에 있습니다. 구현을 변경한 뒤에는 `scripts/test.sh`로 테스트를 실행할 수 있습니다.
+
+
+## 실행 환경 준비
+
+macOS와 Windows에서 **Python 의존성 설치 → PdfCraft CLI 설치** 순서로 준비합니다. `requirements.txt`는 Python 패키지만 설치합니다. PDF 편집과 테스트에 사용하는 **`pdfcraft-cli`**는 [storytold/pdfcraft](https://github.com/storytold/pdfcraft)의 별도 실행 파일입니다.
+
+### macOS
+
+#### 1. Python 환경 준비
+
+Python 3를 설치하고 저장소 최상위 폴더의 터미널에서 실행합니다. 패키지는 프로젝트의 `.venv` 가상 환경에 설치합니다.
+
+```sh
+python3 -m venv .venv
+export PDF2KO_PYTHON="$PWD/.venv/bin/python3"
+"$PDF2KO_PYTHON" -m pip install -r requirements.txt
+scripts/setup.sh
+```
+
+새 터미널에서도 저장소로 이동한 뒤 위 `export` 명령을 실행합니다. `.venv` 생성과 패키지 설치를 매번 반복할 필요는 없습니다.
+
+#### 2. PdfCraft CLI 설치
+
+Homebrew가 있다면 [공식 Formula](https://formulae.brew.sh/formula/pdfcraft-cli)의 명령으로 설치합니다.
+
+```sh
+brew install pdfcraft-cli
+command -v pdfcraft-cli
+pdfcraft-cli --version
+```
+
+이미 설치했다면 `brew upgrade pdfcraft-cli`로 업데이트합니다.
+
+수동 설치는 [공식 릴리스](https://github.com/storytold/pdfcraft/releases/latest)의 macOS CLI ZIP을 사용합니다. v0.21.1의 파일명은 `pdfcraft-cli-0.21.1-macos-universal.zip`이며 Apple silicon과 Intel용입니다. DMG는 데스크톱 앱용입니다.
+
+1. CLI ZIP을 내려받아 압축을 풉니다.
+2. 아래 첫 번째 경로를 압축을 푼 `pdfcraft-cli`의 실제 경로로 바꿔 실행합니다.
+
+```sh
+mkdir -p "$HOME/.local/bin"
+install -m 755 "/absolute/path/to/unpacked/pdfcraft-cli" "$HOME/.local/bin/pdfcraft-cli"
+export PATH="$HOME/.local/bin:$PATH"
+command -v pdfcraft-cli
+pdfcraft-cli --version
+```
+
+수동 설치의 `PATH` 설정을 유지하려면 사용하는 셸의 시작 파일에 같은 `export PATH` 줄을 추가합니다. 기본 zsh에서는 `~/.zshrc`를 사용합니다.
+
+### Windows
+
+#### 1. Python과 Git Bash 준비
+
+1. [Python 3](https://www.python.org/downloads/windows/)와 [Git for Windows](https://gitforwindows.org/)를 설치합니다. Git for Windows에 포함된 **Git Bash**에서 프로젝트의 `scripts/*.sh` 명령을 실행합니다.
+2. Git Bash를 새로 열고 저장소 폴더로 이동합니다. 아래 경로는 예시이므로 실제 위치로 바꿉니다. Git Bash에서 `C:\Users\사용자\Documents\pdf2ko`는 `/c/Users/사용자/Documents/pdf2ko`로 쓸 수 있습니다. 공백이 있는 경로는 따옴표로 감쌉니다.
+3. `python --version`이 Python 3 버전을 출력하는지 확인합니다.
+
+```sh
+cd "/c/Users/사용자/Documents/pdf2ko"
+python --version
+```
+
+`python`을 찾지 못하거나 Microsoft Store가 열리면 Python 설치와 `PATH`를 확인하고 Git Bash를 다시 엽니다. `py --version`만 정상 동작한다면 다음 단계의 첫 명령을 `py -3 -m venv .venv`로 바꿔 실행할 수 있습니다.
+
+#### 2. 프로젝트 전용 Python 환경 만들기
+
+**Git Bash에서** 실행합니다. 아래의 `export`와 `.sh` 명령은 PowerShell이나 명령 프롬프트(cmd)에 그대로 입력하지 않습니다.
+
+```sh
+python -m venv .venv
+export PDF2KO_PYTHON="$PWD/.venv/Scripts/python.exe"
+"$PDF2KO_PYTHON" -m pip install -r requirements.txt
+scripts/setup.sh
+```
+
+Windows 가상 환경의 Python은 `.venv/Scripts/python.exe`에 있습니다. `PDF2KO_PYTHON`으로 이 실행 파일을 지정하므로 별도 활성화 명령 없이 패키지 설치와 프로젝트 실행에 같은 Python을 사용합니다. [Python 가상 환경 문서](https://docs.python.org/3/library/venv.html)
+
+`setup.sh`는 `pypdf`, `pdfplumber`, `reportlab`을 가져올 수 있는지 확인하고 `inbox/`, `documents/`를 준비합니다. PdfCraft CLI는 다음 단계에서 설치합니다.
+
+새 Git Bash 창을 열면 저장소로 이동한 뒤 아래 설정을 다시 실행합니다. 가상 환경 생성과 패키지 설치는 반복하지 않아도 됩니다.
+
+```sh
+export PDF2KO_PYTHON="$PWD/.venv/Scripts/python.exe"
+scripts/run.sh status
+```
+
+#### 3. PdfCraft CLI 설치
+
+[공식 릴리스의 Assets](https://github.com/storytold/pdfcraft/releases/latest)에서 CPU에 맞는 **MSI 또는 portable ZIP 중 하나**를 받습니다. Windows의 **설정 → 시스템 → 정보 → 시스템 종류**에서 CPU 종류를 확인합니다. x64 기반 PC는 `x64`, ARM 기반 PC는 `arm64`를 선택합니다.
+
+아래는 [v0.21.1](https://github.com/storytold/pdfcraft/releases/tag/v0.21.1)의 파일명 예시입니다. 다른 버전은 해당 릴리스의 실제 파일명을 확인합니다.
+
+| 방식 | x64 | ARM64 |
+| --- | --- | --- |
+| 설치 프로그램 | `pdfcraft-0.21.1-windows-x64.msi` | `pdfcraft-0.21.1-windows-arm64.msi` |
+| 압축 해제 후 사용 | `pdfcraft-0.21.1-windows-x64-portable.zip` | `pdfcraft-0.21.1-windows-arm64-portable.zip` |
+
+- **MSI:** 설치 프로그램을 실행한 뒤 설치 폴더에서 `pdfcraft-cli.exe`를 찾습니다.
+- **Portable ZIP:** 원하는 폴더에 **전체 압축을 해제**하고 그 안에서 `pdfcraft-cli.exe`를 찾습니다. 실행 파일만 따로 옮기지 말고 압축을 푼 폴더 전체를 보관합니다.
+
+두 배포 형식에는 CLI가 포함됩니다. [공식 Windows 패키징 코드](https://github.com/storytold/pdfcraft/blob/v0.21.1/packaging/windows/package.ps1)
+
+#### 4. Path 등록과 실행 확인
+
+1. 시작 메뉴에서 **환경 변수**를 검색하고 **계정의 환경 변수 편집**을 엽니다.
+2. **사용자 변수 → Path → 편집 → 새로 만들기**에서 `pdfcraft-cli.exe`가 들어 있는 폴더의 실제 경로를 추가합니다. 예를 들어 파일이 `C:\Tools\PdfCraft\pdfcraft-cli.exe`에 있다면 `C:\Tools\PdfCraft`를 추가합니다.
+3. 설정을 저장한 뒤 Git Bash와 Codex를 다시 엽니다.
+4. 새 Git Bash에서 확인합니다.
+
+```sh
+command -v pdfcraft-cli
+pdfcraft-cli --version
+pdfcraft-cli --help
+```
+
+PowerShell에서 설치 위치를 확인할 때는 `Get-Command pdfcraft-cli`를 사용합니다. 프로젝트의 `.sh` 명령은 계속 Git Bash에서 실행합니다.
+
+### 설치 후 공통 확인
+
+저장소에서 운영체제에 맞게 `PDF2KO_PYTHON`을 설정한 뒤 실행합니다.
+
+```sh
+pdfcraft-cli --help
+pdfcraft-cli tools
+scripts/test.sh
+```
+
+테스트는 임시 폴더에서 입력·출력 무결성을 확인합니다. 실제 문서의 번역·시각 검수를 대신하지 않습니다.
+
+여러 PDF 편집 작업은 `pdfcraft-cli run --script steps.json`으로 실행합니다. 스크립트는 `tool`과 `args`를 가진 단계 배열이며, `doc_open`으로 열기부터 편집과 `doc_save`로 저장까지 한 실행에 묶습니다. 저장 경로에는 `prepare-edit`가 반환한 `candidate_pdf`의 절대 경로를 사용합니다. 실제 편집은 [편집 절차](agents/editor.md)를 따릅니다.
+
+### 설치·실행 문제 해결
+
+| 증상 | 확인할 사항 |
+| --- | --- |
+| `scripts/setup.sh`에서 Python을 찾지 못함 | 저장소 최상위 폴더에서 해당 OS의 `export PDF2KO_PYTHON=...` 명령을 실행했는지 확인합니다. |
+| Python 패키지를 설치했는데 `pdfcraft-cli`가 없음 | CLI는 별도로 설치합니다. `pip install pdfcraft` 등 이름이 비슷한 패키지로 대체하지 않습니다. |
+| Windows에서 `export` 또는 `.sh`를 실행할 수 없음 | PowerShell/cmd 대신 Git Bash에서 실행합니다. |
+| PdfCraft 앱은 열리지만 CLI를 찾지 못함 | `pdfcraft-cli.exe`가 있는 폴더를 사용자 `Path`에 추가하고 Git Bash와 Codex를 다시 엽니다. macOS에서는 `command -v pdfcraft-cli`로 확인합니다. |
+| 예상과 다른 CLI 버전이 실행됨 | macOS/Git Bash는 `type -a pdfcraft-cli`, PowerShell은 `Get-Command pdfcraft-cli -All`로 설치 경로를 확인합니다. |
+| 필요한 PDF 편집 기능을 지원하지 않음 | `pdfcraft-cli --help`와 `pdfcraft-cli tools`에서 지원 기능을 확인합니다. 필요한 기능이 없으면 편집을 중단하고 원인을 알립니다. |

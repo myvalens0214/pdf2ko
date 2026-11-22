@@ -4,26 +4,39 @@ import importlib.util
 import json
 from pathlib import Path
 import shutil
+import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
-
-from reportlab.pdfgen import canvas
 
 SPEC = importlib.util.spec_from_file_location('pipeline', Path(__file__).resolve().parents[1] / 'scripts/pipeline.py')
 p = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(p)
 
 
-def make_pdf(path, text='Take one turn.', rotation=0, pages=1):
+def make_pdf(path, text='Take one turn.', rotation=0, pages=1, image_pages=()):
+    """Create temporary fixtures using PdfCraft CLI only."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    pdf = canvas.Canvas(str(path), pagesize=(612, 792), invariant=1)
-    pdf.setPageRotation(rotation)
-    for _ in range(pages):
+    with tempfile.TemporaryDirectory(prefix='pdfcraft-test-') as directory:
+        image = Path(directory) / 'pixel.png'
+        image.write_bytes(bytes.fromhex(
+            '89504e470d0a1a0a0000000d4948445200000001000000010802000000907753de'
+            '0000000c49444154789c63f8cfc0000003010100c9fe92ef0000000049454e44ae426082'))
+        steps = [{'tool': 'doc_create', 'args': {'from': 'blank', 'pages': pages}}]
         if text:
-            pdf.drawString(72, 700, text)
-        pdf.showPage()
-    pdf.save()
+            steps.extend({'tool': 'page_add_text', 'args': {
+                'doc': 1, 'page': page, 'text': text, 'at': [72, 72]}}
+                for page in range(1, pages + 1))
+        steps.extend({'tool': 'page_add_image', 'args': {
+            'doc': 1, 'page': page, 'path': str(image), 'rect': [72, 100, 144, 172]}}
+            for page in image_pages)
+        if rotation:
+            steps.append({'tool': 'page_rotate', 'args': {'doc': 1, 'degrees': rotation}})
+        steps.append({'tool': 'doc_save', 'args': {'doc': 1, 'path': str(path.resolve())}})
+        script = Path(directory) / 'steps.json'
+        script.write_text(json.dumps(steps), encoding='utf-8')
+        subprocess.run(['pdfcraft-cli', 'run', '--script', str(script)],
+                       check=True, stdout=subprocess.DEVNULL, timeout=30)
 
 
 def table(headers, rows):
@@ -248,6 +261,53 @@ class MarkdownWorkflowTests(unittest.TestCase):
         page = p.extract(self.root, 'rotated')['pages'][0]
         self.assertEqual((page['width'], page['height']),
                          (meta['source']['pages'][0]['width'], meta['source']['pages'][0]['height']))
+
+
+class ImagePublicationTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix='pdf-image-test-')
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+
+    def prepare(self, doc_id, source_pages, candidate_pages):
+        source = self.root / 'inbox' / f'{doc_id}.pdf'
+        make_pdf(source, f'{doc_id} source', pages=len(source_pages),
+                 image_pages=[i for i, has_image in enumerate(source_pages, 1) if has_image])
+        p.register(self.root, source, doc_id)
+        doc = self.root / 'documents' / doc_id
+        (doc / 'review/trans.md').write_text(table(p.TRANSLATION_HEADERS, [
+            ['p001-s001', 1, 'Example.', '예제.']]), encoding='utf-8')
+        (doc / 'review/glossary.md').write_text(table(p.GLOSSARY_HEADERS, [
+            ['t001', 'example', '예제']]), encoding='utf-8')
+        job = p.prepare_edit(self.root, doc_id)
+        candidate = Path(job['candidate_pdf'])
+        make_pdf(candidate, f'{doc_id} translated', pages=len(candidate_pages),
+                 image_pages=[i for i, has_image in enumerate(candidate_pages, 1) if has_image])
+        return job, candidate
+
+    def assert_blocked(self, job, candidate):
+        with self.assertRaises(p.WorkflowError):
+            p.publish(self.root, job['document_id'], job['version'], candidate)
+        self.assertFalse(Path(job['output_pdf']).exists())
+        self.assertFalse((candidate.parent / 'receipt.json').exists())
+        self.assertEqual(list(Path(job['output_pdf']).parent.iterdir()), [])
+
+    def test_publish_blocks_all_images_lost_from_any_source_page(self):
+        cases = [([True], [False]), ([True, True], [True, False]),
+                 ([True, False], [False, True])]
+        for index, (source, candidate) in enumerate(cases):
+            with self.subTest(source=source, candidate=candidate):
+                self.assert_blocked(*self.prepare(f'lost-{index}', source, candidate))
+
+    def test_preserved_images_publish_byte_exact(self):
+        cases = [([True], [True]), ([False, True], [False, True]), ([False], [True])]
+        for index, (source, candidate) in enumerate(cases):
+            with self.subTest(source=source, candidate=candidate):
+                job, candidate = self.prepare(f'kept-{index}', source, candidate)
+                before = candidate.read_bytes()
+                published = p.publish(self.root, job['document_id'], job['version'], candidate)
+                self.assertEqual(Path(published['path']).read_bytes(), before)
+                self.assertEqual(candidate.read_bytes(), before)
 
 
 if __name__ == '__main__':

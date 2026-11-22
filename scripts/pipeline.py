@@ -110,6 +110,80 @@ def pdf_info(path):
         raise WorkflowError(f"유효한 PDF를 읽을 수 없습니다: {path}: {exc}") from exc
 
 
+def pdf_image_calls(path):
+    """Count image paint operations per page, without rendering or writing a PDF.
+
+    Follow invoked Form XObjects and inline images, not unused resources. This
+    detects complete image loss only; it does not establish visual preservation,
+    visibility through clipping/overlays, or preservation of individual images.
+    """
+    from pypdf import PdfReader
+    from pypdf.generic import ContentStream, DictionaryObject, NameObject, StreamObject
+
+    try:
+        with Path(path).open("rb") as stream:
+            reader = PdfReader(stream, strict=True)
+            require(not reader.is_encrypted, "암호화된 PDF의 이미지 구조는 검사할 수 없습니다.")
+
+            def count_images(contents, resources, active_forms):
+                if contents is None:
+                    return 0
+                resources = resources.get_object()
+                require(isinstance(resources, DictionaryObject), "잘못된 PDF 리소스 사전입니다.")
+                total = 0
+                for operands, operator in ContentStream(contents, reader).operations:
+                    if operator == b"INLINE IMAGE":
+                        settings = operands["settings"]
+                        require(int(settings.get("/W", settings.get("/Width", 0))) > 0 and
+                                int(settings.get("/H", settings.get("/Height", 0))) > 0,
+                                "인라인 이미지 크기를 읽을 수 없습니다.")
+                        total += 1
+                    elif operator == b"Do":
+                        require(len(operands) == 1 and isinstance(operands[0], NameObject),
+                                "잘못된 XObject 호출입니다.")
+                        objects = resources.get("/XObject", DictionaryObject()).get_object()
+                        require(isinstance(objects, DictionaryObject) and operands[0] in objects,
+                                f"호출된 XObject를 찾을 수 없습니다: {operands[0]}")
+                        obj = objects[operands[0]].get_object()
+                        require(isinstance(obj, StreamObject), "XObject 스트림을 읽을 수 없습니다.")
+                        subtype = obj.get("/Subtype")
+                        if subtype == "/Image":
+                            require(int(obj.get("/Width", 0)) > 0 and int(obj.get("/Height", 0)) > 0,
+                                    "이미지 크기를 읽을 수 없습니다.")
+                            total += 1
+                        elif subtype == "/Form":
+                            key = id(obj)
+                            require(key not in active_forms, "순환 Form XObject 참조입니다.")
+                            require(len(active_forms) < 64, "Form XObject 중첩이 너무 깊습니다.")
+                            total += count_images(obj, obj.get("/Resources", resources),
+                                                  active_forms | {key})
+                        else:
+                            require(subtype == "/PS", f"알 수 없는 XObject 종류입니다: {subtype}")
+                return total
+
+            counts = []
+            for number, page in enumerate(reader.pages, 1):
+                try:
+                    counts.append(count_images(page.get_contents(),
+                                               page.get("/Resources", DictionaryObject()), set()))
+                except Exception as exc:
+                    raise WorkflowError(f"{number}쪽: {exc}") from exc
+            return counts
+    except Exception as exc:
+        raise WorkflowError(f"PDF 이미지 구조 검사 실패: {path}: {exc}") from exc
+
+
+def require_images_retained(source, candidate):
+    source_calls = pdf_image_calls(source)
+    candidate_calls = pdf_image_calls(candidate)
+    require(len(source_calls) == len(candidate_calls), "원본과 결과의 페이지 수가 다릅니다.")
+    missing = [number for number, (before, after) in
+               enumerate(zip(source_calls, candidate_calls), 1) if before > 0 and after == 0]
+    require(not missing,
+            f"PDF 페이지 {missing}: 원본에 있던 이미지 호출이 결과에서 모두 사라졌습니다. "
+            "배경·그림 소실 가능성이 있어 게시를 중단합니다. 편집 방식을 수정하세요.")
+
+
 def init(root):
     for name in ("inbox", "documents"):
         (root / name).mkdir(parents=True, exist_ok=True)
@@ -325,6 +399,7 @@ def publish(root, doc_id, version, pdf):
     candidate_hash = sha256(candidate)
     require(candidate_hash != meta["source"]["sha256"], "원본 PDF를 번역 결과로 게시할 수 없습니다.")
     require(len(pdf_info(candidate)) == meta["source"]["page_count"], "원본과 결과의 페이지 수가 다릅니다.")
+    require_images_retained(source, candidate)
     target = Path(job["output_pdf"])
     receipt_path = job_path.parent / "receipt.json"
     require(not target.exists() and not target.is_symlink() and

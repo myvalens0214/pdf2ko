@@ -1,20 +1,25 @@
-# pdf2ko의 Python 의존성. 활성화한 가상 환경에서 실행:
-#   python -m pip install -r requirements.txt
+# pdf2ko의 Python 의존성 (macOS / Windows 공통).
 # 원본 구조 확인 및 입력·출력 무결성 검사:
 pypdf>=5
 # 읽기 전용 원문 텍스트·위치 추출:
 pdfplumber>=0.11
-# 사용자가 요청한 한글 텍스트 레이어 및 합성 테스트 입력 생성:
+# 사용자가 요청한 한글 텍스트 레이어 생성:
 reportlab>=4
 
 # 한글 PDF 편집용 외부 의존성: storytold/pdfcraft의 pdfcraft-cli 실행 파일.
-# Rust 기반 CLI이므로 이 requirements.txt와 pip로 설치되지 않습니다.
+# 이 requirements.txt와 pip로 설치되지 않으며 테스트 실행에도 필요합니다.
 # pip의 pdfcraft / pdf-craft 등 유사 이름을 대신 추가하지 마세요.
-# macOS + Homebrew: brew install pdfcraft-cli
-# 수동 설치: https://github.com/storytold/pdfcraft/releases/latest
-#   macOS: pdfcraft-cli-<ver>-macos-universal.zip
-#   Linux: pdfcraft-cli-<ver>-linux-<arch>.tar.gz 또는 .deb/.rpm 패키지
-#   Windows: pdfcraft-<ver>-windows-<arch>-portable.zip 또는 .msi의 CLI
+# macOS: brew install pdfcraft-cli
+# 공식 배포 파일: https://github.com/storytold/pdfcraft/releases/latest
+#   macOS 수동 설치: pdfcraft-cli-<ver>-macos-universal.zip
+#   Windows 설치형: pdfcraft-<ver>-windows-<arch>.msi
+#   Windows 압축형: pdfcraft-<ver>-windows-<arch>-portable.zip
+# Windows의 <arch>는 설정 > 시스템 > 정보 > 시스템 종류에서 확인해
+# x64 또는 arm64를 선택합니다. <ver>는 릴리스의 실제 버전으로 바꿉니다.
+# MSI를 설치하거나 ZIP 전체를 풀고 pdfcraft-cli.exe가 있는 폴더를 찾습니다.
+# 그 폴더를 사용자 환경 변수 Path에 추가합니다(실행 파일 자체가 아닌 폴더).
+# Git Bash와 Codex를 다시 열고 command -v pdfcraft-cli로 확인합니다.
+# PowerShell에서 확인할 때는 Get-Command pdfcraft-cli를 사용합니다.
 # 설치 확인: pdfcraft-cli --version / pdfcraft-cli --help
 # 편집 명령·인자 확인: pdfcraft-cli tools
 # scripts/setup.sh는 Python 의존성 확인과 폴더 준비만 수행합니다.
