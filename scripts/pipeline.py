@@ -184,6 +184,75 @@ def require_images_retained(source, candidate):
             "배경·그림 소실 가능성이 있어 게시를 중단합니다. 편집 방식을 수정하세요.")
 
 
+def pdf_page_geometry(path):
+    """Read page boxes and display transforms without extracting or rendering."""
+    from pypdf import PdfReader
+    return [{"mediabox": list(map(float, page.mediabox)),
+             "cropbox": list(map(float, page.cropbox)),
+             "rotation": page.rotation, "user_unit": float(page.get("/UserUnit", 1))}
+            for page in PdfReader(str(path), strict=True).pages]
+
+
+def pdf_page_signatures(path):
+    """Fingerprint page content/resources without rendering or extracting text.
+
+    Object numbers and stream compression may change when PdfCraft imports a
+    page. Hash resolved objects and decoded streams so those changes are safe,
+    while page order, artwork, fonts and drawing instructions remain checked.
+    """
+    from pypdf import PdfReader
+    from pypdf.generic import (ArrayObject, DictionaryObject, IndirectObject,
+                               StreamObject, TextStringObject, ByteStringObject)
+
+    reader = PdfReader(str(path), strict=True)
+    cache = {}
+
+    def digest(obj, active=frozenset()):
+        if isinstance(obj, IndirectObject):
+            obj = obj.get_object()
+        compound = isinstance(obj, (DictionaryObject, ArrayObject))
+        key = id(obj)
+        if compound:
+            require(key not in active, "페이지 리소스에 순환 참조가 있습니다.")
+            if key in cache:
+                return cache[key]
+            active = active | {key}
+        result = hashlib.sha256()
+        if isinstance(obj, DictionaryObject):
+            is_stream = isinstance(obj, StreamObject)
+            result.update(b"stream" if is_stream else b"dictionary")
+            ignored = {"/Length", "/Filter", "/DecodeParms", "/DL"} if is_stream else set()
+            for name in sorted(obj):
+                if name not in ignored:
+                    result.update(digest(name, active))
+                    result.update(digest(obj[name], active))
+            if is_stream:
+                result.update(obj.get_data())
+        elif isinstance(obj, (ArrayObject, list, tuple)):
+            result.update(b"array")
+            for value in obj:
+                result.update(digest(value, active))
+        elif isinstance(obj, (TextStringObject, ByteStringObject)):
+            result.update(b"string" + obj.original_bytes)
+        else:
+            result.update(str(obj).encode("utf-8"))
+        value = result.digest()
+        if compound:
+            cache[key] = value
+        return value
+
+    signatures = []
+    for page in reader.pages:
+        # Resolve inherited page attributes before hashing. Content streams
+        # retain their full drawing instructions; resources include the fonts,
+        # images and nested Forms actually available to those instructions.
+        material = [list(page.mediabox), list(page.cropbox), page.rotation,
+                    page.get("/UserUnit", 1), page.get("/Contents"),
+                    page.get("/Resources", DictionaryObject())]
+        signatures.append(digest(material).hex())
+    return signatures
+
+
 def init(root):
     for name in ("inbox", "documents"):
         (root / name).mkdir(parents=True, exist_ok=True)
@@ -361,31 +430,94 @@ def edit_job(path, meta, source, version):
             "output_pdf": str(path / "output" / f"{meta['document_id']}-ko-{version}.pdf")}
 
 
+def insertion_job(path, meta, source, version, base_pdf, insert_pdf, at_page):
+    inputs = {}
+    for name, filename in (("base", base_pdf), ("insert", insert_pdf)):
+        file = Path(filename).expanduser().absolute()
+        require(file.is_file() and not file.is_symlink() and file.suffix.lower() == ".pdf",
+                f"삽입 작업의 입력 PDF가 없거나 올바르지 않습니다: {file}")
+        file = file.resolve()
+        fingerprint = sha256(file)
+        pages = pdf_info(file)
+        require(sha256(file) == fingerprint, "확인 중 삽입 입력 PDF가 변경되었습니다.")
+        inputs[name] = {"path": str(file), "sha256": fingerprint, "page_count": len(pages)}
+    require(type(at_page) is int and 1 <= at_page <= inputs["base"]["page_count"] + 1,
+            "삽입 위치는 1부터 기존 PDF의 페이지 수 + 1까지여야 합니다.")
+    return {**edit_job(path, meta, source, version), "schema_version": 5,
+            "operation": "page_insert", "inputs": inputs, "at_page": at_page}
+
+
+def pdf_edit_job(path, meta, source, version, base_pdf):
+    base = Path(base_pdf).expanduser().absolute()
+    require(base.is_file() and not base.is_symlink() and base.suffix.lower() == ".pdf",
+            f"편집 입력 PDF가 없거나 올바르지 않습니다: {base}")
+    base = base.resolve()
+    job = edit_job(path, meta, source, version)
+    require(base not in (Path(job["candidate_pdf"]).resolve(), Path(job["output_pdf"]).resolve()),
+            "편집 입력은 이번 작업의 후보 또는 출력 경로와 같을 수 없습니다.")
+    fingerprint = sha256(base)
+    pages = pdf_info(base)
+    geometry = pdf_page_geometry(base)
+    require(sha256(base) == fingerprint, "확인 중 편집 입력 PDF가 변경되었습니다.")
+    return {**job, "schema_version": 6, "operation": "pdf_edit",
+            "inputs": {"base": {"path": str(base), "sha256": fingerprint,
+                                "page_count": len(pages), "pages": geometry}}}
+
+
 def verified_job(root, doc_id, version):
     require(re.fullmatch(r"v\d{3,}", version), "편집 버전은 v001 형식이어야 합니다.")
     path, meta, source = document(root, doc_id)
     job_path = path / "work" / f"edit-{version}" / "edit-job.json"
     job = read_json(job_path)
-    require(job == edit_job(path, meta, source, version),
-            "MD 또는 편집 작업 정보가 변경되었습니다. 저장된 MD로 prepare-edit를 새로 실행하세요.")
+    if job.get("operation") == "page_insert":
+        expected = insertion_job(path, meta, source, version,
+                                 job["inputs"]["base"]["path"], job["inputs"]["insert"]["path"],
+                                 job["at_page"])
+    elif job.get("operation") == "pdf_edit":
+        expected = pdf_edit_job(path, meta, source, version, job["inputs"]["base"]["path"])
+    else:
+        expected = edit_job(path, meta, source, version)
+    require(job == expected,
+            "MD, 입력 PDF 또는 편집 작업 정보가 변경되었습니다. 입력으로 새 작업을 준비하세요.")
     return path, meta, source, job_path, job
 
 
-def prepare_edit(root, doc_id, version=None):
+def prepare_edit(root, doc_id, version=None, base_pdf=None):
     path, meta, source = document(root, doc_id)
     before = review_hashes(path)
     review_content(root, doc_id)
     require(review_hashes(path) == before, "검증 중 MD가 변경되었습니다. 다시 실행하세요.")
     if version is not None:
         path, meta, source, job_path, job = verified_job(root, doc_id, version)
+        if base_pdf is not None:
+            require(job == pdf_edit_job(path, meta, source, version, base_pdf),
+                    "재개할 편집 작업의 입력 PDF가 다릅니다.")
     else:
         version = next_version(path)
-        job = edit_job(path, meta, source, version)
+        job = (pdf_edit_job(path, meta, source, version, base_pdf) if base_pdf is not None
+               else edit_job(path, meta, source, version))
         require(job["review_sha256"] == before, "준비 중 MD가 변경되었습니다. 다시 실행하세요.")
         job_path = path / "work" / f"edit-{version}" / "edit-job.json"
         write_json(job_path, job)
     require(version not in output_versions(path) and not (job_path.parent / "receipt.json").exists(),
             "이 버전의 결과가 이미 있습니다. 새 편집 버전을 사용하세요.")
+    return {"path": str(job_path), **job}
+
+
+def prepare_insert(root, doc_id, base_pdf, insert_pdf, at_page, version=None):
+    path, meta, source = document(root, doc_id)
+    review_content(root, doc_id)
+    if version is None:
+        version = next_version(path)
+        job = insertion_job(path, meta, source, version, base_pdf, insert_pdf, at_page)
+        job_path = path / "work" / f"edit-{version}" / "edit-job.json"
+        write_json(job_path, job)
+    else:
+        _, _, _, job_path, job = verified_job(root, doc_id, version)
+        require(job == insertion_job(path, meta, source, version, base_pdf, insert_pdf, at_page),
+                "재개할 삽입 작업의 입력 또는 위치가 다릅니다.")
+    require(version not in output_versions(path) and not (job_path.parent / "receipt.json").exists(),
+            "이 버전의 결과가 이미 있습니다. 새 삽입 작업을 준비하세요.")
     return {"path": str(job_path), **job}
 
 
@@ -398,8 +530,18 @@ def publish(root, doc_id, version, pdf):
     require(candidate.is_file() and candidate != source.resolve(), "별도 편집 결과 PDF를 지정하세요.")
     candidate_hash = sha256(candidate)
     require(candidate_hash != meta["source"]["sha256"], "원본 PDF를 번역 결과로 게시할 수 없습니다.")
-    require(len(pdf_info(candidate)) == meta["source"]["page_count"], "원본과 결과의 페이지 수가 다릅니다.")
-    require_images_retained(source, candidate)
+    if job.get("operation") == "page_insert":
+        require_page_insertion(job, candidate)
+    elif job.get("operation") == "pdf_edit":
+        base = job["inputs"]["base"]
+        require(candidate_hash != base["sha256"], "편집 입력과 같은 PDF를 결과로 게시할 수 없습니다.")
+        require(len(pdf_info(candidate)) == base["page_count"], "편집 입력과 결과의 페이지 수가 다릅니다.")
+        require(pdf_page_geometry(candidate) == base["pages"],
+                "편집 입력과 결과의 페이지 크기, 영역 또는 회전이 다릅니다.")
+        require_images_retained(Path(base["path"]), candidate)
+    else:
+        require(len(pdf_info(candidate)) == meta["source"]["page_count"], "원본과 결과의 페이지 수가 다릅니다.")
+        require_images_retained(source, candidate)
     target = Path(job["output_pdf"])
     receipt_path = job_path.parent / "receipt.json"
     require(not target.exists() and not target.is_symlink() and
@@ -411,10 +553,17 @@ def publish(root, doc_id, version, pdf):
         copy_new(candidate, staging / filename)
         require(sha256(staging / filename) == candidate_hash == sha256(candidate), "게시 중 후보 PDF가 변경되었습니다.")
         verified_job(root, doc_id, version)
-        write_json(staging / "receipt.json", {"document_id": doc_id, "version": version,
+        receipt = {"document_id": doc_id, "version": version,
                    "pdf_editor": job["pdf_editor"], "source_sha256": meta["source"]["sha256"],
                    "review_sha256": job["review_sha256"], "pdf_sha256": candidate_hash,
-                   "published_at": now()})
+                   "published_at": now()}
+        if job.get("operation") == "page_insert":
+            receipt.update(operation=job["operation"], inputs=job["inputs"], at_page=job["at_page"],
+                           page_count=sum(item["page_count"] for item in job["inputs"].values()))
+        elif job.get("operation") == "pdf_edit":
+            receipt.update(operation=job["operation"], inputs=job["inputs"],
+                           page_count=job["inputs"]["base"]["page_count"])
+        write_json(staging / "receipt.json", receipt)
         os.link(staging / "receipt.json", receipt_path)
         try:
             os.link(staging / filename, target)
@@ -484,8 +633,16 @@ def main(argv=None):
         cmd.add_argument("doc_id", nargs="?" if name == "status" else None)
         if name in ("prepare-edit", "publish"):
             cmd.add_argument("--version", required=name == "publish")
+        if name == "prepare-edit":
+            cmd.add_argument("--base-pdf", help="등록 원본 대신 편집할 기존 PDF")
         if name == "publish":
             cmd.add_argument("--pdf", required=True)
+    cmd = commands.add_parser("prepare-insert", help="기존 PDF에 다른 PDF 전체를 삽입할 작업 준비")
+    cmd.add_argument("doc_id")
+    cmd.add_argument("--base-pdf", required=True)
+    cmd.add_argument("--insert-pdf", required=True)
+    cmd.add_argument("--at-page", type=int, required=True)
+    cmd.add_argument("--version")
     args = parser.parse_args(argv)
     root = args.root.expanduser().resolve()
     try:
@@ -496,7 +653,11 @@ def main(argv=None):
             elif args.command == "validate":
                 content = review_content(root, args.doc_id)
                 result = {"valid": True, "segments": len(content["segments"]), "terms": len(content["glossary"])}
-            elif args.command == "prepare-edit": result = prepare_edit(root, args.doc_id, args.version)
+            elif args.command == "prepare-edit":
+                result = prepare_edit(root, args.doc_id, args.version, args.base_pdf)
+            elif args.command == "prepare-insert":
+                result = prepare_insert(root, args.doc_id, args.base_pdf, args.insert_pdf,
+                                        args.at_page, args.version)
             elif args.command == "publish": result = publish(root, args.doc_id, args.version, args.pdf)
             else: result = status(root, args.doc_id)
         print(json.dumps(result, ensure_ascii=False, indent=2))
